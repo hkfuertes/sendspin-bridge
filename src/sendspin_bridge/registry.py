@@ -62,6 +62,7 @@ class Stereo:
     right_id: str
     exposed_name: str = ""
     port: int = 0
+    exposed: bool = True
 
 
 class Registry:
@@ -128,6 +129,7 @@ class Registry:
                 right_id=node.get("right_id", ""),
                 exposed_name=node.get("exposed_name", ""),
                 port=_integer(node.get("port"), "stereo port"),
+                exposed=_boolean(node.get("exposed", "true"), "stereo exposed"),
             )
             for node in root.findall("./stereos/stereo")
         ]
@@ -275,7 +277,7 @@ class Registry:
                     ET.SubElement(stereos, "stereo", {
                         "id": stereo.id, "exposed_name": stereo.exposed_name,
                         "left_id": stereo.left_id, "right_id": stereo.right_id,
-                        "port": str(stereo.port),
+                        "port": str(stereo.port), "exposed": str(stereo.exposed).lower(),
                     })
             groups = ET.SubElement(root, "groups")
             for group in self._groups:

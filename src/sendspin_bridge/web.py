@@ -204,6 +204,7 @@ def registry_to_payload(registry: Registry) -> dict:
                 "port": stereo.port,
                 "left_id": stereo.left_id,
                 "right_id": stereo.right_id,
+                "exposed": stereo.exposed,
             }
             for stereo in registry.stereos()
         ],
@@ -272,6 +273,7 @@ def _stereo(value: object, index: int) -> Stereo:
         right_id=_required_text(data, "right_id", f"stereo {index}"),
         exposed_name=_text(data, "exposed_name"),
         port=_integer(data.get("port", 0), f"stereo {index} port", 0, 65535),
+        exposed=_boolean(data.get("exposed", True), f"stereo {index} exposed"),
     )
 
 

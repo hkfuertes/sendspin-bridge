@@ -59,7 +59,7 @@ class ConfigPayloadTests(unittest.TestCase):
     def test_payload_round_trip_keeps_a_stereo_pair_in_multiroom(self) -> None:
         payload = {
             "speakers": [{"id": "left"}, {"id": "right"}, {"id": "kitchen"}],
-            "stereos": [{"id": "pair", "left_id": "left", "right_id": "right", "exposed_name": "Living room", "port": 0}],
+            "stereos": [{"id": "pair", "left_id": "left", "right_id": "right", "exposed_name": "Living room", "port": 0, "exposed": False}],
             "groups": [{"id": "home", "speaker_ids": ["left", "right", "kitchen"]}],
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -67,6 +67,7 @@ class ConfigPayloadTests(unittest.TestCase):
             registry_from_payload(payload, str(path), 7000, 10).save()
             restored = registry_to_payload(Registry.load(path))
             self.assertEqual(restored["stereos"][0]["exposed_name"], "Living room")
+            self.assertIs(restored["stereos"][0]["exposed"], False)
             self.assertEqual(restored["stereos"][0]["port"], 7030)
             self.assertEqual(restored["groups"][0]["speaker_ids"], ["left", "right", "kitchen"])
             payload["stereos"][0]["right_id"] = "missing"

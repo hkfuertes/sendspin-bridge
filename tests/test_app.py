@@ -247,6 +247,33 @@ class ManagerStartupTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     await manager.close()
 
+    async def test_hidden_stereo_stays_a_pair_without_its_own_airplay_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            manager = Manager(Config(config_path=f"{temp}/config.xml"))
+            manager.registry = Registry(
+                speakers=[Speaker(id=speaker_id) for speaker_id in ("a", "b", "c", "d")],
+                stereos=[Stereo("shown", "a", "b"), Stereo("hidden", "c", "d", exposed=False)],
+                groups=[Group("home", speaker_ids=["a", "b", "c", "d"])],
+            )
+            server = Mock(start_server=AsyncMock(), close=AsyncMock())
+            server.add_event_listener.return_value = lambda: None
+            web = Mock(start=AsyncMock(), close=AsyncMock(), url="http://localhost")
+            with (
+                patch("sendspin_bridge.app._load_identity"),
+                patch("sendspin_bridge.app.FileServerPairingStore.open", new_callable=AsyncMock),
+                patch("sendspin_bridge.app.lan_ipv4", return_value="127.0.0.1"),
+                patch("sendspin_bridge.app.SendspinServer", return_value=server),
+                patch("sendspin_bridge.app.ConfigWeb", return_value=web),
+                patch.object(AirPlayInput, "start", new_callable=AsyncMock) as advertise,
+            ):
+                try:
+                    await manager.start()
+                    self.assertEqual(advertise.await_count, 2)  # The shown pair and the group only.
+                    self.assertIs(manager._stereo("c"), manager.stereo_targets["hidden"])  # Still one shared volume.
+                    self.assertEqual(manager.group_targets["home"].channels["d"], (1, "c"))  # Still L/R in groups.
+                finally:
+                    await manager.close()
+
     async def test_early_inbound_player_joins_group(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             manager = Manager(Config(config_path=f"{temp}/config.xml"))

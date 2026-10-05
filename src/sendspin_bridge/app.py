@@ -351,7 +351,8 @@ class Manager:
         for stereo in stereos:
             group = Group(stereo.id, stereo.exposed_name, stereo.port, [stereo.left_id, stereo.right_id])
             target = GroupTarget(self, group, [stereo], key=f"stereo:{stereo.id}")
-            await target.start()
+            if stereo.exposed:  # A hidden pair keeps L/R and one volume, playing only through its groups.
+                await target.start()
             self.stereo_targets[stereo.id] = target
             for speaker_id in group.speaker_ids:
                 self.member_groups.setdefault(speaker_id, []).append(target)

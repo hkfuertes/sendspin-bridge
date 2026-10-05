@@ -22,7 +22,7 @@ function blankGroup() {
 
 function blankStereo() {
   const id = `stereo-${crypto.getRandomValues(new Uint32Array(4)).join("-")}`;
-  return { id, exposed_name: "New stereo", port: 0, left_id: "", right_id: "" };
+  return { id, exposed_name: "New stereo", port: 0, left_id: "", right_id: "", exposed: true };
 }
 
 function groupChoices(speakers, stereos) {
@@ -288,9 +288,12 @@ function StereoCard({ stereo, speakers, available, startOpen, onChange, onSwap, 
   return <article class={cardClass}>
     <div class="flex min-h-[66px] flex-wrap items-center gap-x-[18px] gap-y-3 px-[17px] py-3 max-sm:gap-y-2">
       <span class={deviceNameClass}><strong class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold">{stereo.exposed_name || stereo.id}</strong><small class="overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted">L: {members[0]?.exposed_name || "Choose speaker"} · R: {members[1]?.exposed_name || "Choose speaker"} · {connected.length}/2 online</small></span>
-      <div class="w-[170px] max-sm:w-full">
-        <label class="mb-0.5 flex justify-between text-[11px] text-muted" for={volumeId}>Stereo volume <output class="font-semibold text-ink" for={volumeId}>{previewVolume ?? volume}%</output></label>
-        <input class="m-0 w-full cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-45" id={volumeId} type="range" min="0" max="100" value={previewVolume ?? volume} disabled={!connected.length || !stereo.port} onInput={(event) => setPreviewVolume(Number(event.currentTarget.value))} onChange={async (event) => { await onCommitVolume(Number(event.currentTarget.value)); setPreviewVolume(null); }} />
+      <div class="flex items-center gap-6 max-sm:w-full max-sm:justify-between">
+        <div class="w-[170px] max-sm:w-[min(55%,200px)]">
+          <label class="mb-0.5 flex justify-between text-[11px] text-muted" for={volumeId}>Stereo volume <output class="font-semibold text-ink" for={volumeId}>{previewVolume ?? volume}%</output></label>
+          <input class="m-0 w-full cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-45" id={volumeId} type="range" min="0" max="100" value={previewVolume ?? volume} disabled={!connected.length || !stereo.port} onInput={(event) => setPreviewVolume(Number(event.currentTarget.value))} onChange={async (event) => { await onCommitVolume(Number(event.currentTarget.value)); setPreviewVolume(null); }} />
+        </div>
+        <Toggle checked={stereo.exposed} onChange={(exposed) => onChange("exposed", exposed)}>Exposed</Toggle>
       </div>
     </div>
     <details class="group border-t border-line" open={startOpen}>

@@ -112,7 +112,9 @@ source is checked in.
   Unpaired exposed members stay advertised on their own; paired members are not
   advertised individually but remain connected. An unpaired speaker can mix its
   own target and group; paired speakers can mix their stereo and group targets. Group volume moves the members' average and keeps their
-  differences; at 0 or 100 every member ends up equal. During playback,
+  differences; at 0 or 100 every member ends up equal. Both halves of a stereo pair share one volume: once
+  both are connected they take the lower of the two, and the pair, either member, the pair's AirPlay sender
+  or a device's own volume buttons move both. During playback,
   dashboard volume changes are reported to the AirPlay sender via DACP when
   available: one level for the active individual target or group, never its
   members separately. AirPlay senders without DACP cannot receive updates.

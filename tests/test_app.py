@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import tempfile
+import time
 import unittest
 from unittest.mock import AsyncMock, Mock, call, patch
 
+import aiohttp
 import numpy as np
+from aiosendspin.models.core import ClientHelloMessage, ClientHelloPayload
+from aiosendspin.server import VolumeChangedEvent
 
 from sendspin_bridge.app import AirPlayInput, Config, GroupTarget, Manager, Target
 from sendspin_bridge.raop import Receiver, VOLUME
@@ -40,10 +45,11 @@ class ManagerVolumeTests(unittest.TestCase):
         kitchen = FakeTarget()
         offline = FakeTarget(connected=False)
         manager.targets = {"kitchen": kitchen, "offline": offline}
+        manager.stereo_targets = {}
 
         self.assertEqual(manager.speaker_state("kitchen"), {"connected": True, "volume": 40})
         kitchen.playing = True
-        self.assertEqual(manager.set_speaker_volume("kitchen", 73), 73)
+        self.assertEqual(manager.set_speaker_volume("kitchen", 73), {"kitchen": 73})
         self.assertEqual(kitchen.calls, [73])
         kitchen.input.send_volume.assert_called_once_with(73)
         kitchen.playing = False
@@ -60,6 +66,7 @@ class ManagerVolumeTests(unittest.TestCase):
         manager.targets = {"kitchen": kitchen, "bedroom": bedroom, "offline": offline}
         group = Mock(active=True)
         manager.group_targets = {"salon": group}
+        manager.stereo_targets = {}
 
         self.assertEqual(manager.set_group_volume(["kitchen", "bedroom", "offline"], 50, "salon"), {"kitchen": 30, "bedroom": 70})
         self.assertEqual((kitchen.calls, bedroom.calls, offline.calls), ([30], [70], []))
@@ -76,12 +83,36 @@ class ManagerVolumeTests(unittest.TestCase):
         manager = object.__new__(Manager)
         left, right = FakeTarget(20), FakeTarget(60)
         manager.targets = {"left": left, "right": right}
-        stereo = Mock(active=True)
+        stereo = Mock(active=True, channels={"left": (0, "right"), "right": (1, "left")})
         manager.stereo_targets = {"pair": stereo}
-        self.assertEqual(manager.set_stereo_volume(["left", "right"], 50, "pair"), {"left": 30, "right": 70})
+        self.assertEqual(manager.set_stereo_volume(["left", "right"], 50, "pair"), {"left": 50, "right": 50})
         stereo.input.send_volume.assert_called_once_with(50)
         left.input.send_volume.assert_not_called()
         right.input.send_volume.assert_not_called()
+
+    def test_stereo_halves_share_one_volume(self) -> None:
+        manager = object.__new__(Manager)
+        pair = Stereo("pair", "left", "right")
+        manager.stereo_targets = {"pair": GroupTarget(manager, Group("pair", speaker_ids=["left", "right"]), [pair], key="stereo:pair")}
+        manager.targets = {}
+        for speaker_id, volume in (("left", 30), ("right", 70)):
+            target = manager.targets[speaker_id] = Target(manager, Speaker(id=speaker_id, exposed=False), [], paired=True)
+            target.player, target.volume = Mock(), volume
+        left, right = manager.targets["left"], manager.targets["right"]
+        sent = lambda target: [item.args[0] for item in target.player.group.group_role.return_value.set_volume.call_args_list]
+
+        right.volume_ready_at = time.monotonic() + 60
+        manager.equalize_stereo("left")  # Right is still reporting its connect-time volume.
+        self.assertEqual((sent(left), sent(right)), ([], []))
+        right.volume_ready_at = 0
+        manager.equalize_stereo("right")  # Pairing or reconnecting settles on the lower volume.
+        self.assertEqual((left.volume, right.volume, sent(left), sent(right)), (30, 30, [], [30]))
+
+        left._on_player_event(left.player, VolumeChangedEvent(volume=45, muted=False))  # Left's own buttons.
+        self.assertEqual(sent(right), [30, 45])
+        right._on_player_event(right.player, VolumeChangedEvent(volume=30, muted=False))  # Late echo of our command.
+        self.assertEqual(sent(left), [])
+        self.assertEqual(manager.set_speaker_volume("right", 60), {"left": 60, "right": 60})
 
     def test_incoming_airplay_volume_does_not_echo(self) -> None:
         target = Target(Mock(), Speaker(id="kitchen"), [])
@@ -242,6 +273,39 @@ class ManagerStartupTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(manager.targets[speaker.id].active)
                 finally:
                     await manager.close()
+
+    async def test_close_does_not_wait_for_a_replaced_inbound_connection(self) -> None:
+        # A player reconnecting with its client_id leaves aiosendspin's old handler waiting; aiohttp's
+        # default 60 s shutdown_timeout then stalled Save & restart for a minute.
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        payload = ClientHelloPayload(name="Echo", supported_roles=["controller@v1"], client_id="echo")
+        hello = ClientHelloMessage(payload=payload).to_json()
+        url = f"http://127.0.0.1:{port}/sendspin"
+        with tempfile.TemporaryDirectory() as temp:
+            manager = Manager(Config(config_path=f"{temp}/config.xml", server_port=port))
+            web = Mock(start=AsyncMock(), close=AsyncMock(), url="http://localhost")
+            with (
+                patch("sendspin_bridge.app.lan_ipv4", return_value="127.0.0.1"),
+                patch("sendspin_bridge.app.ConfigWeb", return_value=web),
+                patch("aiosendspin.server.server.AsyncZeroconf", return_value=AsyncMock()),  # Stay off the LAN.
+                patch("aiosendspin.server.server.AsyncServiceBrowser", return_value=AsyncMock()),
+            ):
+                await manager.start()
+                async with aiohttp.ClientSession() as session, asyncio.timeout(10):
+                    stale = await session.ws_connect(url, autoping=False)
+                    await stale.send_str(hello)
+                    while (client := manager.server.get_client("echo")) is None or client.connection is None:
+                        await asyncio.sleep(0.02)
+                    old = client.connection
+                    fresh = await session.ws_connect(url)
+                    await fresh.send_str(hello)
+                    while manager.server.get_client("echo").connection in (old, None):
+                        await asyncio.sleep(0.02)
+                    await manager.close()
+                    await stale.close()
+                    await fresh.close()
 
 
 if __name__ == "__main__":

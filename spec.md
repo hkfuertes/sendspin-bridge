@@ -79,7 +79,11 @@ Cada `<group>` y `<stereo>` tiene su propio receptor AirPlay. Su PCM se guarda
 por índice de chunk; cada miembro mezcla su copia (L, R o estéreo) con la
 entrada individual si no está emparejado, usando saturación S16. El offset de cada miembro se aplica
 por fotogramas completos antes de mezclar, sin permutar L/R. El volumen mueve la
-media de los miembros sin borrar su diferencia, limitado a 0–100.
+media de los miembros sin borrar su diferencia, limitado a 0–100. Las dos mitades
+de una pareja comparten volumen: al estar ambas conectadas toman el menor, y la
+pareja, cualquiera de sus miembros, su emisor AirPlay o los botones de un altavoz
+mueven las dos. Tras conectar o recibir un comando, los informes de volumen de un
+altavoz se ignoran durante `VOLUME_SETTLE_S` (2 s) para no reenviar ecos.
 
 No se usan grupos internos de `aiosendspin`: un `PushStream` nativo no mezcla
 entradas concurrentes y sustituiría el target individual. La mezcla se hace

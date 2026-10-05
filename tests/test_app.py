@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, call, patch
 
+import aiohttp
 import numpy as np
+from aiosendspin.models.core import ClientHelloMessage, ClientHelloPayload
 
 from sendspin_bridge.app import AirPlayInput, Config, GroupTarget, Manager, Target
 from sendspin_bridge.raop import Receiver, VOLUME
@@ -242,6 +245,39 @@ class ManagerStartupTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(manager.targets[speaker.id].active)
                 finally:
                     await manager.close()
+
+    async def test_close_does_not_wait_for_a_replaced_inbound_connection(self) -> None:
+        # A player reconnecting with its client_id leaves aiosendspin's old handler waiting; aiohttp's
+        # default 60 s shutdown_timeout then stalled Save & restart for a minute.
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        payload = ClientHelloPayload(name="Echo", supported_roles=["controller@v1"], client_id="echo")
+        hello = ClientHelloMessage(payload=payload).to_json()
+        url = f"http://127.0.0.1:{port}/sendspin"
+        with tempfile.TemporaryDirectory() as temp:
+            manager = Manager(Config(config_path=f"{temp}/config.xml", server_port=port))
+            web = Mock(start=AsyncMock(), close=AsyncMock(), url="http://localhost")
+            with (
+                patch("sendspin_bridge.app.lan_ipv4", return_value="127.0.0.1"),
+                patch("sendspin_bridge.app.ConfigWeb", return_value=web),
+                patch("aiosendspin.server.server.AsyncZeroconf", return_value=AsyncMock()),  # Stay off the LAN.
+                patch("aiosendspin.server.server.AsyncServiceBrowser", return_value=AsyncMock()),
+            ):
+                await manager.start()
+                async with aiohttp.ClientSession() as session, asyncio.timeout(10):
+                    stale = await session.ws_connect(url, autoping=False)
+                    await stale.send_str(hello)
+                    while (client := manager.server.get_client("echo")) is None or client.connection is None:
+                        await asyncio.sleep(0.02)
+                    old = client.connection
+                    fresh = await session.ws_connect(url)
+                    await fresh.send_str(hello)
+                    while manager.server.get_client("echo").connection in (old, None):
+                        await asyncio.sleep(0.02)
+                    await manager.close()
+                    await stale.close()
+                    await fresh.close()
 
 
 if __name__ == "__main__":

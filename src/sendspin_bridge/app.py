@@ -312,6 +312,10 @@ class Manager:
             advertise_addresses=[self.address],
             discover_clients=True,
         )
+        # ponytail: aiosendspin leaves a reconnected player's old handler waiting and keeps aiohttp's 60 s
+        # shutdown_timeout, so Save & restart stalled a minute. Private attributes (aiosendspin is pinned);
+        # drop this once aiosendspin closes replaced connections or exposes the timeout.
+        self.server._app_runner._shutdown_timeout = 1.0
         self.web = ConfigWeb(
             config_path=self.config.config_path,
             port_base=self.config.port_base,

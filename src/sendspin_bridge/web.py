@@ -33,7 +33,7 @@ class ConfigWeb:
         advertised_host: str,
         registry: Callable[[], Registry],
         speaker_state: Callable[[str], dict],
-        set_speaker_volume: Callable[[str, int], int | None],
+        set_speaker_volume: Callable[[str, int], dict[str, int] | None],
         set_group_volume: Callable[[list[str], int, str], dict[str, int]],
         set_stereo_volume: Callable[[list[str], int, str], dict[str, int]],
         replace_registry: Callable[[Registry], None],
@@ -124,10 +124,12 @@ class ConfigWeb:
             volume = _integer(_object(await request.json(), "volume").get("volume"), "volume", 0, 100)
         except (ValueError, json.JSONDecodeError) as error:
             return web.json_response({"error": str(error)}, status=400)
-        updated = self._set_speaker_volume(request.match_info["speaker_id"], volume)
+        speaker_id = request.match_info["speaker_id"]
+        updated = self._set_speaker_volume(speaker_id, volume)
         if updated is None:
             return web.json_response({"error": "speaker is not connected"}, status=409)
-        return web.json_response({"volume": updated})
+        # A stereo half moves its partner too, so return every level that changed.
+        return web.json_response({"volume": updated[speaker_id], "speakers": updated})
 
     async def _put_group_volume(self, request: web.Request) -> web.Response:
         try:

@@ -86,6 +86,21 @@ class ConfigPayloadTests(unittest.TestCase):
 
 
 class GroupVolumeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_speaker_volume_returns_every_level_it_moved(self) -> None:
+        set_volume = Mock(return_value={"left": 60, "right": 60})
+        config = ConfigWeb(
+            config_path="/tmp/unused.xml", port_base=7000, port_range=10,
+            host="127.0.0.1", port=8080, advertised_host="127.0.0.1",
+            registry=lambda: Registry(), speaker_state=lambda _: {}, set_speaker_volume=set_volume,
+            set_group_volume=Mock(), set_stereo_volume=Mock(), replace_registry=Mock(), restart=Mock(),
+        )
+        request = Mock(match_info={"speaker_id": "left"})
+        request.json = AsyncMock(return_value={"volume": 60})
+        response = await config._put_volume(request)
+        self.assertEqual(json.loads(response.body), {"volume": 60, "speakers": {"left": 60, "right": 60}})
+        set_volume.return_value = None
+        self.assertEqual((await config._put_volume(request)).status, 409)
+
     async def test_group_volume_validates_members_and_returns_live_levels(self) -> None:
         group = Group(id="home", speaker_ids=["kitchen", "bedroom"])
         set_volume = Mock(return_value={"kitchen": 30, "bedroom": 70})

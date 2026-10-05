@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -31,6 +32,8 @@ from .web import ConfigWeb
 
 LOG = logging.getLogger(__name__)
 AIRPLAY_FORMAT = AudioFormat(sample_rate=44_100, bit_depth=16, channels=2)
+# ponytail: fixed time for a player to report its volume after connecting or echo our command; raise for slow WiFi.
+VOLUME_SETTLE_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -177,6 +180,8 @@ class Target:
         self.playing = False
         self.delay_ms = speaker.delay_ms or 0
         self.volume = 100
+        self.volume_ready_at = 0.0  # Until then the player may still report its connect-time volume.
+        self.volume_quiet_until = 0.0  # Until then its reports are that handshake or echoes of our commands.
         self.remove_player_listener = None
 
     async def start(self) -> None:
@@ -192,6 +197,10 @@ class Target:
         self.remove_player_listener = player.add_event_listener(self._on_player_event)
         self.manager.registry.set_client_id(self.speaker.id, player.client_id)
         self.delay_ms = self.manager.registry.delay(self.speaker.id)
+        # Its connect-time client/state may already be applied (no event left to hear); later reports still update it.
+        self.volume = player.roles_by_family("player")[0].volume
+        self.volume_ready_at = self.volume_quiet_until = time.monotonic() + VOLUME_SETTLE_S
+        asyncio.get_running_loop().call_later(VOLUME_SETTLE_S, self.manager.equalize_stereo, self.speaker.id)
         LOG.info("Sendspin player %r attached to %s", player.name, self.speaker.id)
 
     def detach(self, client_id: str) -> None:
@@ -248,6 +257,7 @@ class Target:
             return
         role = self.player.group.group_role("player")
         if role is not None:
+            self.volume_quiet_until = time.monotonic() + VOLUME_SETTLE_S
             role.set_volume(self.volume)
 
     async def close(self) -> None:
@@ -269,6 +279,10 @@ class Target:
     def _on_player_event(self, _player, event) -> None:
         if isinstance(event, VolumeChangedEvent):
             self.volume = event.volume
+            partner = self.manager.stereo_partner(self.speaker.id)
+            # Outside the quiet window the device changed itself (e.g. its buttons): move its stereo partner along.
+            if partner is not None and partner.volume != self.volume and time.monotonic() >= self.volume_quiet_until:
+                partner.set_volume(self.volume)
 
 
 class Manager:
@@ -388,14 +402,36 @@ class Manager:
         target = self.targets.get(speaker_id)
         return {"connected": target is not None and target.player is not None, "volume": target.volume if target is not None else 100}
 
-    def set_speaker_volume(self, speaker_id: str, volume: int) -> int | None:
+    def set_speaker_volume(self, speaker_id: str, volume: int) -> dict[str, int] | None:
         target = self.targets.get(speaker_id)
         if target is None or target.player is None:
             return None
+        stereo = self._stereo(speaker_id)
+        if stereo is not None:  # Stereo halves share one volume.
+            return self.set_stereo_volume(stereo.group.speaker_ids, volume, stereo.group.id)
         target.set_volume(volume)
         if target.playing and target.input is not None:
             target.input.send_volume(target.volume)
-        return target.volume
+        return {speaker_id: target.volume}
+
+    def stereo_partner(self, speaker_id: str) -> Target | None:
+        """The connected other half of speaker_id's running stereo pair."""
+        stereo = self._stereo(speaker_id)
+        partner = self.targets.get(stereo.channels[speaker_id][1]) if stereo is not None else None
+        return partner if partner is not None and partner.player is not None else None
+
+    def equalize_stereo(self, speaker_id: str) -> None:
+        """Once both halves have settled after connecting, both take the lower volume."""
+        target, partner = self.targets.get(speaker_id), self.stereo_partner(speaker_id)
+        if target is None or target.player is None or partner is None or partner.volume_ready_at > time.monotonic():
+            return  # The later half's own timer equalizes the pair.
+        volume = min(target.volume, partner.volume)
+        for member in (target, partner):
+            if member.volume != volume:
+                member.set_volume(volume)
+
+    def _stereo(self, speaker_id: str) -> GroupTarget | None:
+        return next((stereo for stereo in self.stereo_targets.values() if speaker_id in stereo.channels), None)
 
     def request_restart(self) -> None:
         LOG.info("Restarting bridge to apply configuration changes")
@@ -405,6 +441,11 @@ class Manager:
         targets = [(speaker_id, self.targets[speaker_id]) for speaker_id in speaker_ids if speaker_id in self.targets and self.targets[speaker_id].player]
         levels = [float(target.volume) for _, target in targets]
         _spread_volume(levels, float(volume))
+        index = {speaker_id: position for position, (speaker_id, _) in enumerate(targets)}
+        for stereo in self.stereo_targets.values():
+            halves = [index[speaker_id] for speaker_id in stereo.channels if speaker_id in index]
+            if len(halves) == 2:  # Stereo halves share one volume; their average keeps the group's.
+                levels[halves[0]] = levels[halves[1]] = (levels[halves[0]] + levels[halves[1]]) / 2
         for (_, target), level in zip(targets, levels, strict=True):
             target.set_volume(round(level))
         updated = {speaker_id: target.volume for speaker_id, target in targets}

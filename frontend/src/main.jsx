@@ -87,10 +87,9 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ volume }),
       });
-      update((copy) => {
-        const speaker = copy.speakers.find((item) => item.id === speakerId);
-        if (speaker) speaker.volume = result.volume;
-      });
+      update((copy) => copy.speakers.forEach((speaker) => {
+        if (result.speakers[speaker.id] !== undefined) speaker.volume = result.speakers[speaker.id];
+      }));
     } catch (error) {
       await load();
       setMessage(error.message);
@@ -303,7 +302,7 @@ function StereoCard({ stereo, speakers, available, startOpen, onChange, onSwap, 
           <Select label="Right speaker" value={stereo.right_id} speakers={available.filter((speaker) => speaker.id !== stereo.left_id || speaker.id === stereo.right_id)} onChange={(value) => onChange("right_id", value)} />
         </div>
         {stereo.left_id && stereo.right_id && <div class="grid gap-2">
-          <p class="m-0 text-xs leading-normal text-muted">Individual AirPlay targets are paused while paired. Removing the pair restores their previous visibility.</p>
+          <p class="m-0 text-xs leading-normal text-muted">Both speakers share one volume, starting at the lower one. Individual AirPlay targets are paused while paired. Removing the pair restores their previous visibility.</p>
           {members.map((speaker, index) => speaker && <SpeakerCard key={speaker.id} speaker={speaker} side={index === 0 ? "Left" : "Right"}
             onChange={(field, value) => onMemberChange(speaker.id, field, value)}
             onPreviewVolume={(volume) => onMemberPreviewVolume(speaker.id, volume)}

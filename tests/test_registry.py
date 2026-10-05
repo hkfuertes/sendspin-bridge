@@ -69,8 +69,11 @@ class RegistryTests(unittest.TestCase):
             registry = Registry.load(path)
             self.assertEqual(registry.stereos(), [])
             Registry(path, speakers=registry.speakers(), groups=registry.groups(),
-                     stereos=[Stereo("pair", "left", "right", "Living room")]).save()
+                     stereos=[Stereo("pair", "left", "right", "Living room", exposed=False)]).save()
             restored = Registry.load(path)
+            self.assertFalse(restored.stereos()[0].exposed)
+            path.write_text(path.read_text().replace(' exposed="false"', ""))  # Pairs saved before the flag.
+            self.assertTrue(Registry.load(path).stereos()[0].exposed)
             self.assertEqual(restored.stereos()[0].port, 7040)
             self.assertEqual(restored.stereos()[0].exposed_name, "Living room")
             self.assertEqual(restored.groups()[0].speaker_ids, ["left", "right", "kitchen"])

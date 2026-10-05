@@ -100,6 +100,8 @@ source is checked in.
   receives the left channel and `right_id` the right, each duplicated to both
   output channels so mono-only or stereo devices work. A speaker can belong to
   at most one pair. If one side disconnects, the other plays the full mix.
+  `exposed="false"` on a `<stereo>` stops advertising the pair's own target; a
+  hidden pair still plays left/right in its groups and keeps one volume.
   Physical speakers stay in `<speakers>` for discovery, status, live volume and
   synchronization settings; the dashboard nests them under Stereo while paired.
   Existing configurations without `<stereos>` continue to load unchanged.

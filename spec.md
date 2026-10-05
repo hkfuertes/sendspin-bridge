@@ -66,8 +66,9 @@ de diez desde 7000.
   dos targets individuales aunque sus flags `exposed` sean `true`; el XML retiene
   las preferencias y las recupera al quitar la pareja. Los altavoces físicos
   permanecen en `<speakers>` para descubrimiento, volumen y retardo.
-- Cada `<stereo>` anuncia un target propio, usa dos altavoces distintos y enruta
-  L/R duplicando cada lado en ambos canales de salida. Los grupos incluyen la
+- Cada `<stereo>` anuncia un target propio salvo con `exposed="false"`; oculta,
+  la pareja sigue sonando L/R en sus grupos y con un solo volumen. Usa dos
+  altavoces distintos y enruta L/R duplicando cada lado en ambos canales de salida. Los grupos incluyen la
   pareja listando sus dos IDs de altavoz; un solo lado se rechaza. Si falta un
   miembro conectado, el restante recibe la mezcla estéreo completa.
 - `delay_ms` está incluido en `[-500, 500]` y afecta sólo al audio de grupos y parejas:
